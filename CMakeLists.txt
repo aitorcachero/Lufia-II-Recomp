@@ -143,3 +143,11 @@ endif()
 
 # Netplay is not built into this target.
 # No multitap: two seats, one controller per port.
+
+
+# Auto-stage launcher deluxe poster into target directory
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:${PROJECT_NAME}>/assets/img
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/assets/img/poster.bmp" $<TARGET_FILE_DIR:${PROJECT_NAME}>/assets/img/poster.bmp
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/assets/img/poster.png" $<TARGET_FILE_DIR:${PROJECT_NAME}>/assets/img/poster.png
+    VERBATIM)

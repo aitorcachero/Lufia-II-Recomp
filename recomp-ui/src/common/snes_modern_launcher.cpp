@@ -21,6 +21,7 @@
 #include "imgui.h"
 #include "imgui_impl_opengl3.h"
 #include "recomp_launcher.h"
+#include "launcher_gl.h"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -128,6 +129,18 @@ static bool prompt_browse_rom(SDL_Window *window, char *out_path, size_t max_len
     return launcher_pick_rom(out_path, max_len);
 }
 #endif
+
+static GLuint load_texture_from_bmp(const char *path, int *out_w, int *out_h);
+static GLuint load_texture_any(const char *path, int *out_w, int *out_h) {
+    if (!path || !path[0]) return 0;
+    LauncherTexture lt = launcher_texture_load(path);
+    if (lt.id != 0) {
+        if (out_w) *out_w = lt.w;
+        if (out_h) *out_h = lt.h;
+        return lt.id;
+    }
+    return load_texture_from_bmp(path, out_w, out_h);
+}
 
 static GLuint load_texture_from_bmp(const char *path, int *out_w, int *out_h) {
     SDL_Surface *surface = SDL_LoadBMP(path);
@@ -457,17 +470,27 @@ extern "C" int run_snes_modern_launcher(
     // 4. Cargar póster vertical del juego
     int poster_w = 0, poster_h = 0;
     const char *poster_candidates[] = {
+        "assets/img/poster.png",
         "assets/img/poster.bmp",
-        (game && game->boxart_path) ? game->boxart_path : NULL,
-        "assets/img/boxart.bmp",
+        "assets/img/poster_raw.jpg",
+        "assets/img/boxart.png",
         "assets/img/boxart.tga",
+        "assets/img/boxart.bmp",
+        "../assets/img/poster.png",
         "../assets/img/poster.bmp",
+        "../assets/img/poster_raw.jpg",
+        "../../assets/img/poster.png",
+        "../../assets/img/poster.bmp",
+        "../../assets/img/poster_raw.jpg",
+        "../../launcher_assets/img/boxart.png",
+        "../../launcher_assets/img/boxart.tga",
+        (game && game->boxart_path) ? game->boxart_path : NULL,
         NULL
     };
     GLuint poster_tex = 0;
     for (int i = 0; poster_candidates[i]; i++) {
         if (poster_candidates[i] && snes_file_exists(poster_candidates[i])) {
-            poster_tex = load_texture_from_bmp(poster_candidates[i], &poster_w, &poster_h);
+            poster_tex = load_texture_any(poster_candidates[i], &poster_w, &poster_h);
             if (poster_tex) break;
         }
     }
