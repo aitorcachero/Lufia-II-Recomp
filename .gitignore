@@ -1,0 +1,42 @@
+# Generated recompiler output — derived from a copyrighted ROM. Never commit.
+/src/gen/
+/recomp/funcs.h
+
+# The ROM itself, in every form. Players supply their own.
+*.sfc
+*.smc
+*.srm
+*.bin
+*.tsv
+*.bgrx
+*.bmp
+!assets/img/*.bmp
+*.exe
+*.apk
+/android/
+title_fill.*
+last_run_report.json
+
+# Build trees and packaged output
+/build/
+/build-*/
+/dist/
+/saves/
+.vs/
+*.user
+*.suo
+
+# Local probe output that names paths on one machine
+/rom_probe.json
+
+# Launcher/runtime state written beside the executable (and in the repo root
+# when the game is run from there): the cached ROM path, keybinds, settings.
+# All of it is one machine's, none of it is the project's.
+/rom.cfg
+/keybinds.ini
+/config.ini
+/input.ini
+
+.DS_Store
+
+.github/

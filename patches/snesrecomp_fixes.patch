@@ -1,0 +1,231 @@
+diff --git a/runner/runner.cmake b/runner/runner.cmake
+index 074e228..1a78784 100644
+--- a/runner/runner.cmake
++++ b/runner/runner.cmake
+@@ -2,8 +2,8 @@
+ # An explicit cache selection always wins, including an existing LLE build.
+ set(_SNESRECOMP_FRAME_DEFAULT "LLE")
+ string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _SNESRECOMP_FRAME_PROCESSOR)
+-if(WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8 AND
+-   _SNESRECOMP_FRAME_PROCESSOR MATCHES "^(amd64|x86_64|x64)$")
++if((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8 AND
++   _SNESRECOMP_FRAME_PROCESSOR MATCHES "^(amd64|x86_64|x64)$") OR ANDROID)
+     set(_SNESRECOMP_FRAME_DEFAULT "HLE")
+ endif()
+ set(SNESRECOMP_FRAME_IMPL "${_SNESRECOMP_FRAME_DEFAULT}" CACHE STRING
+diff --git a/runner/src/desktop/display_aspect.h b/runner/src/desktop/display_aspect.h
+index 04e3bf8..31e1a63 100644
+--- a/runner/src/desktop/display_aspect.h
++++ b/runner/src/desktop/display_aspect.h
+@@ -9,7 +9,8 @@
+ typedef enum SnesDisplayAspect {
+   kSnesDisplayAspect_Crt4x3 = 0,
+   kSnesDisplayAspect_SquarePixels8x7 = 1,
+-  kSnesDisplayAspect_SquareFrame1x1 = 2,
++  kSnesDisplayAspect_SteamDeck16x10 = 2,
++  kSnesDisplayAspect_SquareFrame1x1 = 3,
+   kSnesDisplayAspect_Count,
+ } SnesDisplayAspect;
+ 
+@@ -26,16 +27,17 @@ static inline SnesDisplayAspect SnesDisplayAspect_Clamp(int value) {
+ }
+ 
+ static inline const char *SnesDisplayAspect_Name(int value) {
+-  static const char *const names[] = {"4:3", "8:7", "1:1"};
++  static const char *const names[] = {"4:3", "16:9", "16:10", "1:1"};
+   return names[SnesDisplayAspect_Clamp(value)];
+ }
+ 
+ /* Shared by the standard desktop config reader and custom game hosts. */
+ static inline bool SnesDisplayAspect_Parse(const char *text, uint8_t *value) {
+-  static const char *const aliases[][6] = {
+-    {"4:3", "CRT", "0", "Classic", "Original", NULL},
+-    {"8:7", "SquarePixels", "1", "16:9", "Hack", "Wide"},
+-    {"1:1", "SquareFrame", "2", "Stretch", "Estirado", "Full"}
++  static const char *const aliases[][7] = {
++    {"4:3", "CRT", "0", "Classic", "Original", NULL, NULL},
++    {"16:9", "8:7", "SquarePixels", "1", "Hack", "Wide", NULL},
++    {"16:10", "SteamDeck", "2", "Deck", "8:5", NULL, NULL},
++    {"1:1", "SquareFrame", "3", "Stretch", "Estirado", "Full", NULL}
+   };
+   if (!text || !value) return false;
+   for (int i = 0; i < kSnesDisplayAspect_Count; ++i) {
+@@ -54,8 +56,8 @@ static inline bool SnesDisplayAspect_Parse(const char *text, uint8_t *value) {
+  * 4:3, 8:7, or 1:1 respectively. */
+ static inline void SnesDisplayAspect_GetPixelAspect(
+     SnesDisplayAspect aspect, int *numerator, int *denominator) {
+-  static const uint8_t kNumerators[kSnesDisplayAspect_Count] = {7, 1, 7};
+-  static const uint8_t kDenominators[kSnesDisplayAspect_Count] = {6, 1, 8};
++  static const uint8_t kNumerators[kSnesDisplayAspect_Count] = {7, 1, 1, 7};
++  static const uint8_t kDenominators[kSnesDisplayAspect_Count] = {6, 1, 1, 8};
+   aspect = SnesDisplayAspect_Clamp((int)aspect);
+   if (numerator) *numerator = kNumerators[aspect];
+   if (denominator) *denominator = kDenominators[aspect];
+diff --git a/runner/src/desktop/host_clock.c b/runner/src/desktop/host_clock.c
+index c2a9529..985afd0 100644
+--- a/runner/src/desktop/host_clock.c
++++ b/runner/src/desktop/host_clock.c
+@@ -24,7 +24,8 @@ void snes_host_clock_simulation_done(SnesHostClock *c, double now,
+   /* Keep ordinary sub-frame scheduling jitter on the original phase. A
+    * loader may preserve its backlog so its non-interactive frames refill the
+    * guest-driven audio queue; all ordinary gameplay drops stale work. */
+-  c->next_simulation = preserve_debt || now <= deadline
++  const double jitter_margin = 0.005;
++  c->next_simulation = preserve_debt || now <= (deadline + jitter_margin)
+       ? deadline : now + 1.0 / c->simulation_hz;
+   ++c->simulation_frames;
+ }
+diff --git a/runner/src/desktop/host_main.c b/runner/src/desktop/host_main.c
+index d7329c9..96949c7 100644
+--- a/runner/src/desktop/host_main.c
++++ b/runner/src/desktop/host_main.c
+@@ -355,10 +355,15 @@ static void WaitUntil(double deadline) {
+   double now = MonotonicSeconds();
+   while (now < deadline) {
+     double remaining_ms = (deadline - now) * 1000;
++#ifdef __ANDROID__
++    if (remaining_ms <= 4.0) break;
++    SDL_Delay(1);
++#else
+     if (remaining_ms > 1.5)
+       SDL_Delay((Uint32)(remaining_ms - 0.5));
+     else
+       SDL_Delay(0);
++#endif
+     now = MonotonicSeconds();
+   }
+   ProfileEnd(kProfileWait, profile_start);
+@@ -2265,8 +2270,6 @@ static void FillAudioBuffer(Uint8 *stream, int len) {
+       } else {
+         g_audio_primed = true;
+         RtlRenderAudio((int16 *)g_audiobuffer, g_frames_per_block, g_audio_channels);
+-        if (dsp_available(g_snes->apu->dsp) < 4)
+-          g_audio_primed = false;
+       }
+       g_audiobuffer_cur = g_audiobuffer;
+       g_audiobuffer_end = g_audiobuffer + g_frames_per_block * g_audio_channels * sizeof(int16);
+@@ -2694,6 +2697,13 @@ static int FindRomBesideExe(char *out, size_t cap) {
+     snprintf(out, cap, "%s", name);
+     return 1;
+   }
++  /* Fallback: also check for generic rom.sfc beside the executable/current dir */
++  f = fopen("rom.sfc", "rb");
++  if (f) {
++    fclose(f);
++    snprintf(out, cap, "rom.sfc");
++    return 1;
++  }
+   out[0] = '\0';
+   return 0;
+ }
+@@ -3328,10 +3338,22 @@ int snesrecomp_desktop_main(const SnesDesktopHostGame *game, int argc, char **ar
+   signal(SIGABRT, crash_handler);
+ #ifdef __ANDROID__
+   /* All relative I/O (config.ini, rom.cfg, saves/, last_run_report.json)
+-   * lands in the app's external files dir, which is adb-pushable. */
++   * lands in the app's external files dir, or internal files dir as fallback. */
+   {
+-    const char *storage = SDL_AndroidGetExternalStoragePath();
+-    if (storage) chdir(storage);
++    const char *ext = SDL_AndroidGetExternalStoragePath();
++    const char *in = SDL_AndroidGetInternalStoragePath();
++    int chdir_ok = 0;
++    if (ext && chdir(ext) == 0) {
++      FILE *f = fopen("rom.sfc", "rb");
++      if (!f) f = fopen("Terranigma (ESP).sfc", "rb");
++      if (f) { fclose(f); chdir_ok = 1; }
++    }
++    if (!chdir_ok && in && chdir(in) == 0) {
++      chdir_ok = 1;
++    }
++    if (!chdir_ok && ext) {
++      chdir(ext);
++    }
+   }
+ #endif
+ #ifdef _WIN32
+@@ -3385,6 +3407,7 @@ int snesrecomp_desktop_main(const SnesDesktopHostGame *game, int argc, char **ar
+   const char *framedump_dir = args.framedump_dir;
+   const char *config_file = args.config_file;
+   if (!config_file) {
++#ifndef __ANDROID__
+     /* Anchor cwd to the binary's own directory FIRST. This is what makes an
+      * AppImage work: host_paths.c prefers $APPIMAGE over /proc/self/exe, so
+      * "next to the binary" means next to the user-visible .AppImage file
+@@ -3402,6 +3425,9 @@ int snesrecomp_desktop_main(const SnesDesktopHostGame *game, int argc, char **ar
+                              getcwd(cwdbuf, sizeof(cwdbuf)) ? cwdbuf : "(unknown)",
+                              anchored ? "ok" : "declined");
+     }
++#else
++    EnsureConfigIniNextToExe(program_path);
++#endif
+   }
+   if (game->state_menu_hotkeys) ConfigUseStateMenuDefaults();
+   if (game->in_game_launcher) ConfigUseInGameLauncherDefaults();
+@@ -3527,6 +3553,44 @@ int snesrecomp_desktop_main(const SnesDesktopHostGame *game, int argc, char **ar
+     int have_positional = (arg_rom != NULL);
+     if (!have_positional)
+       FindRomBesideExe(beside_exe, sizeof(beside_exe));
++#ifdef __ANDROID__
++    /* On Android mobile: search candidates if not found yet */
++    if (!have_positional && beside_exe[0] == '\0') {
++      const char *candidates[] = { "Terranigma (ESP).sfc", "rom.sfc", "rom.smc" };
++      for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
++        FILE *f = fopen(candidates[i], "rb");
++        if (f) {
++          fclose(f);
++          snprintf(beside_exe, sizeof(beside_exe), "%s", candidates[i]);
++          break;
++        }
++      }
++    }
++    if (!have_positional && beside_exe[0] == '\0') {
++      const char *storage_dirs[] = { SDL_AndroidGetExternalStoragePath(), SDL_AndroidGetInternalStoragePath() };
++      const char *candidates[] = { "Terranigma (ESP).sfc", "rom.sfc", "rom.smc" };
++      for (size_t s = 0; s < 2; s++) {
++        if (!storage_dirs[s]) continue;
++        for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
++          char full[1024];
++          snprintf(full, sizeof(full), "%s/%s", storage_dirs[s], candidates[i]);
++          FILE *f = fopen(full, "rb");
++          if (f) {
++            fclose(f);
++            chdir(storage_dirs[s]);
++            snprintf(beside_exe, sizeof(beside_exe), "%s", full);
++            break;
++          }
++        }
++        if (beside_exe[0] != '\0') break;
++      }
++    }
++    if (beside_exe[0] != '\0') {
++      snprintf(rom_path_buf, sizeof(rom_path_buf), "%s", beside_exe);
++      rom_resolved_by_launcher = 1;
++      snesrecomp_rom_cache_write(rom_path_buf);
++    }
++#endif
+ 
+ #if defined(RECOMP_LAUNCHER)
+     {
+@@ -3538,6 +3602,9 @@ int snesrecomp_desktop_main(const SnesDesktopHostGame *game, int argc, char **ar
+       const char *env_no_launcher = getenv("SNESRECOMP_NO_LAUNCHER");
+       int want_launcher = !headless && !no_launcher && !(env_no_launcher && *env_no_launcher) &&
+                           (force_launcher || !have_positional);
++#ifdef __ANDROID__
++      want_launcher = 0; /* Android mobile bypasses desktop launcher window */
++#endif
+ 
+       /* SkipLauncher: boot straight from the cached ROM. A missing/unreadable
+        * cache falls through to the launcher. */
+@@ -4285,7 +4352,11 @@ error_reading:;
+     /* Pacing. A title that decouples presentation (presentation_hz hook)
+      * gets re-presented between simulated frames from the captured field;
+      * everyone else presents once per simulated frame. */
++    #ifdef __ANDROID__
++    bool paced_realtime = !g_turbo && !g_config.disable_frame_delay && (VSyncInterval() == 0);
++#else
+     bool paced_realtime = !g_turbo && !g_config.disable_frame_delay;
++#endif
+     bool paced_custom = PresentationDecoupled() && paced_realtime;
+     double video_now = MonotonicSeconds();
+     if (video_now >= next_display_check) {

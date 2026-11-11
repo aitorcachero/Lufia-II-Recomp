@@ -1,0 +1,8 @@
+display_name    = Lufia II: Rise of the Sinistrals
+rom_file        = Lufia II - Rise of the Sinistrals (ESP).sfc
+expected_crc32  = d93c0dd4
+expected_sha256 = 6eecabd46305ac95d9cf3a17e1392c24a1b68a7a313173ef0c5b5a3a24cf3353
+rom_size        = 3145728
+mapping         = lorom
+region          = USA
+game_id         = snesrecomp-d93c0dd4
