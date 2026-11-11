@@ -158,6 +158,21 @@ static bool prompt_browse_rom(SDL_Window *window, char *out_path, size_t max_len
         if (!hwnd) hwnd = GetForegroundWindow();
     }
 
+    bool was_fullscreen = false;
+#if defined(LNG_SDL3)
+    if (window && (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN)) {
+        was_fullscreen = true;
+        SDL_SetWindowFullscreen(window, false);
+        SDL_Delay(50);
+    }
+#else
+    if (window && (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN_DESKTOP)) {
+        was_fullscreen = true;
+        SDL_SetWindowFullscreen(window, 0);
+        SDL_Delay(50);
+    }
+#endif
+
     if (hwnd) {
         EnableWindow(hwnd, FALSE);
     }
@@ -184,6 +199,15 @@ static bool prompt_browse_rom(SDL_Window *window, char *out_path, size_t max_len
         EnableWindow(hwnd, TRUE);
         SetForegroundWindow(hwnd);
         SetActiveWindow(hwnd);
+    }
+
+    if (was_fullscreen) {
+#if defined(LNG_SDL3)
+        SDL_SetWindowFullscreen(window, true);
+#else
+        SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP);
+#endif
+        SDL_Delay(50);
     }
 
     if (ok && file_buf[0]) {
@@ -403,16 +427,16 @@ extern "C" int run_snes_modern_launcher(
             game_candidates[cand_idx++] = "Lufia (ESP).smc";
             game_candidates[cand_idx++] = "Lufia I.sfc";
             game_candidates[cand_idx++] = "Lufia.sfc";
-        } else if (strstr(gtitle, "Final Fantasy V") || strstr(gtitle, "Final Fantasy 5")) {
-            game_candidates[cand_idx++] = "Final Fantasy V (ESP).smc";
-            game_candidates[cand_idx++] = "Final Fantasy V (ESP).sfc";
-            game_candidates[cand_idx++] = "Final Fantasy V.sfc";
-            game_candidates[cand_idx++] = "Final Fantasy 5.sfc";
         } else if (strstr(gtitle, "Final Fantasy VI") || strstr(gtitle, "Final Fantasy 6")) {
             game_candidates[cand_idx++] = "Final Fantasy VI (ESP).smc";
             game_candidates[cand_idx++] = "Final Fantasy VI (ESP).sfc";
             game_candidates[cand_idx++] = "Final Fantasy VI.sfc";
             game_candidates[cand_idx++] = "Final Fantasy 6.sfc";
+        } else if (strstr(gtitle, "Final Fantasy V") || strstr(gtitle, "Final Fantasy 5")) {
+            game_candidates[cand_idx++] = "Final Fantasy V (ESP).smc";
+            game_candidates[cand_idx++] = "Final Fantasy V (ESP).sfc";
+            game_candidates[cand_idx++] = "Final Fantasy V.sfc";
+            game_candidates[cand_idx++] = "Final Fantasy 5.sfc";
         } else if (strstr(gtitle, "Final Fantasy IV") || strstr(gtitle, "Final Fantasy 4")) {
             game_candidates[cand_idx++] = "Final Fantasy IV (ESP).smc";
             game_candidates[cand_idx++] = "Final Fantasy IV (ESP).sfc";

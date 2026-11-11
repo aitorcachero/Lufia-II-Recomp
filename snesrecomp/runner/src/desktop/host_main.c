@@ -3723,6 +3723,10 @@ int snesrecomp_desktop_main(const SnesDesktopHostGame *game, int argc, char **ar
           if (rom_path_buf[0]) {
             snesrecomp_rom_cache_write(rom_path_buf);
             rom_resolved_by_launcher = 1;
+            /* Closing the launcher's window can queue an application quit (its window
+             * was the last visible one). That close meant "launch the game". */
+            SDL_PumpEvents();
+            SDL_FlushEvent(SDL_QUIT);
           } else {
             /* PLAY is gated on a verified ROM, so LAUNCH without one is a
              * launcher bug. Never answer it with the console file picker: for
@@ -4034,6 +4038,19 @@ error_reading:;
   host_report_breadcrumb("window created: %dx%d flags=0x%x",
                          window_width, window_height, g_win_flags);
 
+  SDL_ShowWindow(window);
+  SDL_RaiseWindow(window);
+  SDL_PumpEvents();
+  SDL_FlushEvent(SDL_QUIT);
+#ifdef _WIN32
+  HWND hwnd_game = (HWND)SDL_GetPointerProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_WIN32_HWND_POINTER, NULL);
+  if (hwnd_game) {
+    SetWindowPos(hwnd_game, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+    SetForegroundWindow(hwnd_game);
+    BringWindowToTop(hwnd_game);
+  }
+#endif
+
   if (!g_renderer_funcs.Initialize(window)) {
     host_report_breadcrumb("renderer init FAILED (output_method=%d)",
                            g_config.output_method);
@@ -4202,6 +4219,8 @@ error_reading:;
 
   snes_savestate_menu_set_compose(ComposeStateThumbnail);
   host_report_breadcrumb("entering main loop");
+  SDL_PumpEvents();
+  SDL_FlushEvent(SDL_QUIT);
 
   while (running) {
     g_profile_frame = frameCtr + 1;
