@@ -2684,25 +2684,61 @@ static int FindRomBesideExe(char *out, size_t cap) {
   FILE *f;
   if (!name || !name[0])
     return 0;
-  if (snesrecomp_exe_dir_path(name, out, cap)) {
-    f = fopen(out, "rb");
-    if (f) {
-      fclose(f);
-      return 1;
+
+  const char *alts[8] = { name, NULL };
+  char alt_smc[512] = { 0 };
+  char alt_sfc[512] = { 0 };
+  char alt_SMC[512] = { 0 };
+  strncpy(alt_smc, name, sizeof(alt_smc) - 1);
+  strncpy(alt_sfc, name, sizeof(alt_sfc) - 1);
+  strncpy(alt_SMC, name, sizeof(alt_SMC) - 1);
+  char *dot = strrchr(alt_smc, '.');
+  if (dot) {
+    strcpy(dot, ".smc");
+    alts[1] = alt_smc;
+    char *dot2 = strrchr(alt_sfc, '.');
+    if (dot2) { strcpy(dot2, ".sfc"); alts[2] = alt_sfc; }
+    char *dot3 = strrchr(alt_SMC, '.');
+    if (dot3) { strcpy(dot3, ".SMC"); alts[3] = alt_SMC; }
+  }
+
+  const char *dirs[] = { "", "../", "../../", "roms para recompilar/", "../roms para recompilar/", "../../roms para recompilar/", "G:/Proyectos/Snes-recomp/roms para recompilar/", NULL };
+
+  for (int a = 0; alts[a]; a++) {
+    if (snesrecomp_exe_dir_path(alts[a], out, cap)) {
+      f = fopen(out, "rb");
+      if (f) {
+        fclose(f);
+        return 1;
+      }
+    }
+    for (int d = 0; dirs[d]; d++) {
+      char test_buf[1024];
+      snprintf(test_buf, sizeof(test_buf), "%s%s", dirs[d], alts[a]);
+      f = fopen(test_buf, "rb");
+      if (f) {
+        fclose(f);
+#ifdef _WIN32
+        if (GetFullPathNameA(test_buf, (DWORD)cap, out, NULL) > 0) return 1;
+#endif
+        snprintf(out, cap, "%s", test_buf);
+        return 1;
+      }
     }
   }
-  f = fopen(name, "rb");
-  if (f) {
-    fclose(f);
-    snprintf(out, cap, "%s", name);
-    return 1;
-  }
-  /* Fallback: also check for generic rom.sfc beside the executable/current dir */
-  f = fopen("rom.sfc", "rb");
-  if (f) {
-    fclose(f);
-    snprintf(out, cap, "rom.sfc");
-    return 1;
+
+  /* Fallback: also check for generic rom.sfc / rom.smc */
+  const char *gen[] = { "rom.sfc", "rom.smc", "../rom.sfc", "../rom.smc", NULL };
+  for (int g = 0; gen[g]; g++) {
+    f = fopen(gen[g], "rb");
+    if (f) {
+      fclose(f);
+#ifdef _WIN32
+      if (GetFullPathNameA(gen[g], (DWORD)cap, out, NULL) > 0) return 1;
+#endif
+      snprintf(out, cap, "%s", gen[g]);
+      return 1;
+    }
   }
   out[0] = '\0';
   return 0;
@@ -3728,6 +3764,33 @@ int snesrecomp_desktop_main(const SnesDesktopHostGame *game, int argc, char **ar
   resolved_argv[1] = NULL;
   argv = resolved_argv;
   argc = 1;
+#ifdef _WIN32
+  if (rom_path_buf[0]) {
+    char full_check[1024];
+    if (GetFileAttributesA(rom_path_buf) != INVALID_FILE_ATTRIBUTES) {
+      if (GetFullPathNameA(rom_path_buf, sizeof(full_check), full_check, NULL) > 0) {
+        strncpy(rom_path_buf, full_check, sizeof(rom_path_buf) - 1);
+        rom_path_buf[sizeof(rom_path_buf) - 1] = '\0';
+      }
+    } else {
+      const char *search_prefixes[] = {
+        "", "../", "../../", "roms para recompilar/", "../roms para recompilar/",
+        "../../roms para recompilar/", "G:/Proyectos/Snes-recomp/roms para recompilar/", NULL
+      };
+      for (int sp = 0; search_prefixes[sp]; sp++) {
+        snprintf(full_check, sizeof(full_check), "%s%s", search_prefixes[sp], rom_path_buf);
+        if (GetFileAttributesA(full_check) != INVALID_FILE_ATTRIBUTES) {
+          char canon[1024];
+          if (GetFullPathNameA(full_check, sizeof(canon), canon, NULL) > 0) {
+            strncpy(rom_path_buf, canon, sizeof(rom_path_buf) - 1);
+            rom_path_buf[sizeof(rom_path_buf) - 1] = '\0';
+            break;
+          }
+        }
+      }
+    }
+  }
+#endif
   host_report_breadcrumb("rom resolved: %s", rom_path_buf);
   g_rom_path = rom_path_buf;
 

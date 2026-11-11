@@ -55,6 +55,76 @@ static bool snes_file_exists(const char *path) {
 #endif
 }
 
+static bool try_resolve_rom_path(const char *rel_or_name, char *out_full, size_t max_len) {
+    if (!rel_or_name || !rel_or_name[0]) return false;
+
+    if (snes_file_exists(rel_or_name)) {
+#ifdef _WIN32
+        if (GetFullPathNameA(rel_or_name, (DWORD)max_len, out_full, NULL) > 0) return true;
+#else
+        if (realpath(rel_or_name, out_full)) return true;
+#endif
+        strncpy(out_full, rel_or_name, max_len - 1);
+        out_full[max_len - 1] = '\0';
+        return true;
+    }
+
+    const char *prefixes[] = {
+        "",
+        "./",
+        "../",
+        "../../",
+        "roms para recompilar/",
+        "../roms para recompilar/",
+        "../../roms para recompilar/",
+        "../../../roms para recompilar/",
+        "G:/Proyectos/Snes-recomp/roms para recompilar/",
+        "G:/Proyectos/Snes-recomp/",
+        NULL
+    };
+
+    char base_no_ext[MAX_PATH] = { 0 };
+    strncpy(base_no_ext, rel_or_name, sizeof(base_no_ext) - 1);
+    char *dot = strrchr(base_no_ext, '.');
+    if (dot && (_stricmp(dot, ".sfc") == 0 || _stricmp(dot, ".smc") == 0)) {
+        *dot = '\0';
+    }
+
+    const char *exts[] = { "", ".sfc", ".smc", ".SMC", NULL };
+
+    for (int p = 0; prefixes[p]; p++) {
+        char test_path[MAX_PATH];
+        snprintf(test_path, sizeof(test_path), "%s%s", prefixes[p], rel_or_name);
+        if (snes_file_exists(test_path)) {
+#ifdef _WIN32
+            if (GetFullPathNameA(test_path, (DWORD)max_len, out_full, NULL) > 0) return true;
+#else
+            if (realpath(test_path, out_full)) return true;
+#endif
+            strncpy(out_full, test_path, max_len - 1);
+            out_full[max_len - 1] = '\0';
+            return true;
+        }
+
+        if (dot) {
+            for (int e = 1; exts[e]; e++) {
+                snprintf(test_path, sizeof(test_path), "%s%s%s", prefixes[p], base_no_ext, exts[e]);
+                if (snes_file_exists(test_path)) {
+#ifdef _WIN32
+                    if (GetFullPathNameA(test_path, (DWORD)max_len, out_full, NULL) > 0) return true;
+#else
+                    if (realpath(test_path, out_full)) return true;
+#endif
+                    strncpy(out_full, test_path, max_len - 1);
+                    out_full[max_len - 1] = '\0';
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
 #ifdef _WIN32
 static UINT_PTR CALLBACK BrowseHookProc(HWND hdlg, UINT uiMsg, WPARAM wParam, LPARAM lParam) {
     if (uiMsg == WM_INITDIALOG) {
@@ -283,8 +353,14 @@ extern "C" int run_snes_modern_launcher(
     }
 
     char current_rom[MAX_PATH] = { 0 };
+    char resolved_rom[MAX_PATH] = { 0 };
+
     if (initial_rom && initial_rom[0]) {
-        strncpy(current_rom, initial_rom, sizeof(current_rom) - 1);
+        if (try_resolve_rom_path(initial_rom, resolved_rom, sizeof(resolved_rom))) {
+            strncpy(current_rom, resolved_rom, sizeof(current_rom) - 1);
+        } else {
+            strncpy(current_rom, initial_rom, sizeof(current_rom) - 1);
+        }
     } else {
         FILE *from = fopen("rom.cfg", "r");
         if (from) {
@@ -296,32 +372,91 @@ extern "C" int run_snes_modern_launcher(
             }
             fclose(from);
         }
+        if (current_rom[0] && try_resolve_rom_path(current_rom, resolved_rom, sizeof(resolved_rom))) {
+            strncpy(current_rom, resolved_rom, sizeof(current_rom) - 1);
+        }
     }
 
-    // Auto-detección por nombre de archivo si aún está vacío
-    if (current_rom[0] == '\0') {
-        const char *candidates[] = {
-            "Illusion of Time (ESP).sfc", "Illusion of Time.sfc", "Illusion of Gaia.sfc",
-            "Terranigma (ESP).sfc", "Terranigma.sfc",
-            "Secret of Evermore (ESP).sfc", "Secret of Evermore.sfc",
-            "Ys III - Wanderers from Ys (ESP).sfc", "Ys III - Wanderers from Ys (ESP).smc",
-            "Ys III - Wanderers from Ys.sfc", "Ys III.sfc",
-            "The Legend of Zelda - A Link to the Past (ESP).sfc", "The Legend of Zelda - A Link to the Past (ESP).smc",
-            "The Legend of Zelda - A Link to the Past.sfc", "Zelda.sfc",
-            "Final Fantasy - Magic Quest (ESP).smc", "Final Fantasy - Magic Quest (ESP).sfc", "Final Fantasy - Mystic Quest.sfc",
-            "Final Fantasy II (ESP).smc", "Final Fantasy II (ESP).sfc", "Final Fantasy II.sfc",
-            "Final Fantasy III (ESP).smc", "Final Fantasy III (ESP).sfc", "Final Fantasy III.sfc",
-            "Final Fantasy IV (ESP).smc", "Final Fantasy IV (ESP).sfc", "Final Fantasy IV.sfc",
-            "Final Fantasy V (ESP).smc", "Final Fantasy V (ESP).sfc", "Final Fantasy V.sfc",
-            "Final Fantasy VI (ESP).smc", "Final Fantasy VI (ESP).sfc", "Final Fantasy VI.sfc",
-            "Lufia & The Fortress of Doom (ESP).SMC", "Lufia & The Fortress of Doom (ESP).sfc", "Lufia & The Fortress of Doom.sfc",
-            "Lufia II - Rise of the Sinistrals (ESP).smc", "Lufia II - Rise of the Sinistrals (ESP).sfc", "Lufia II - Rise of the Sinistrals.sfc",
-            "Lufia (ESP).sfc", "Lufia (ESP).smc", "Lufia.sfc",
-            "rom.sfc", "rom.smc", NULL
-        };
-        for (int i = 0; candidates[i]; i++) {
-            if (snes_file_exists(candidates[i])) {
-                strncpy(current_rom, candidates[i], sizeof(current_rom) - 1);
+    // Auto-detección inteligente según el juego
+    if (current_rom[0] == '\0' || !snes_file_exists(current_rom)) {
+        const char *gtitle = (game && game->name) ? game->name : (window_title ? window_title : "");
+        const char *game_candidates[64] = { 0 };
+        int cand_idx = 0;
+
+        if (strstr(gtitle, "Lufia II") || strstr(gtitle, "Rise of the Sinistrals")) {
+            game_candidates[cand_idx++] = "Lufia II - Rise of the Sinistrals (ESP).smc";
+            game_candidates[cand_idx++] = "Lufia II - Rise of the Sinistrals (ESP).sfc";
+            game_candidates[cand_idx++] = "Lufia II - Rise of the Sinistrals.sfc";
+            game_candidates[cand_idx++] = "Lufia II - Rise of the Sinistrals.smc";
+            game_candidates[cand_idx++] = "Lufia II (ESP).sfc";
+            game_candidates[cand_idx++] = "Lufia II.sfc";
+            game_candidates[cand_idx++] = "Lufia 2.sfc";
+            game_candidates[cand_idx++] = "Lufia (ESP).sfc";
+            game_candidates[cand_idx++] = "Lufia (ESP).smc";
+        } else if (strstr(gtitle, "Lufia") || strstr(gtitle, "Fortress of Doom")) {
+            game_candidates[cand_idx++] = "Lufia & The Fortress of Doom (ESP).SMC";
+            game_candidates[cand_idx++] = "Lufia & The Fortress of Doom (ESP).smc";
+            game_candidates[cand_idx++] = "Lufia & The Fortress of Doom (ESP).sfc";
+            game_candidates[cand_idx++] = "Lufia & The Fortress of Doom.sfc";
+            game_candidates[cand_idx++] = "Lufia & The Fortress of Doom.smc";
+            game_candidates[cand_idx++] = "Lufia (ESP).sfc";
+            game_candidates[cand_idx++] = "Lufia (ESP).smc";
+            game_candidates[cand_idx++] = "Lufia I.sfc";
+            game_candidates[cand_idx++] = "Lufia.sfc";
+        } else if (strstr(gtitle, "Final Fantasy V") || strstr(gtitle, "Final Fantasy 5")) {
+            game_candidates[cand_idx++] = "Final Fantasy V (ESP).smc";
+            game_candidates[cand_idx++] = "Final Fantasy V (ESP).sfc";
+            game_candidates[cand_idx++] = "Final Fantasy V.sfc";
+            game_candidates[cand_idx++] = "Final Fantasy 5.sfc";
+        } else if (strstr(gtitle, "Final Fantasy VI") || strstr(gtitle, "Final Fantasy 6")) {
+            game_candidates[cand_idx++] = "Final Fantasy VI (ESP).smc";
+            game_candidates[cand_idx++] = "Final Fantasy VI (ESP).sfc";
+            game_candidates[cand_idx++] = "Final Fantasy VI.sfc";
+            game_candidates[cand_idx++] = "Final Fantasy 6.sfc";
+        } else if (strstr(gtitle, "Final Fantasy IV") || strstr(gtitle, "Final Fantasy 4")) {
+            game_candidates[cand_idx++] = "Final Fantasy IV (ESP).smc";
+            game_candidates[cand_idx++] = "Final Fantasy IV (ESP).sfc";
+            game_candidates[cand_idx++] = "Final Fantasy IV.sfc";
+        } else if (strstr(gtitle, "Final Fantasy III") || strstr(gtitle, "Final Fantasy 3")) {
+            game_candidates[cand_idx++] = "Final Fantasy III (ESP).smc";
+            game_candidates[cand_idx++] = "Final Fantasy III (ESP).sfc";
+            game_candidates[cand_idx++] = "Final Fantasy III.sfc";
+        } else if (strstr(gtitle, "Final Fantasy II") || strstr(gtitle, "Final Fantasy 2")) {
+            game_candidates[cand_idx++] = "Final Fantasy II (ESP).smc";
+            game_candidates[cand_idx++] = "Final Fantasy II (ESP).sfc";
+            game_candidates[cand_idx++] = "Final Fantasy II.sfc";
+        } else if (strstr(gtitle, "Magic Quest") || strstr(gtitle, "Mystic Quest")) {
+            game_candidates[cand_idx++] = "Final Fantasy - Magic Quest (ESP).smc";
+            game_candidates[cand_idx++] = "Final Fantasy - Magic Quest (ESP).sfc";
+            game_candidates[cand_idx++] = "Final Fantasy - Mystic Quest.sfc";
+        } else if (strstr(gtitle, "Terranigma")) {
+            game_candidates[cand_idx++] = "Terranigma (ESP).sfc";
+            game_candidates[cand_idx++] = "Terranigma.sfc";
+        } else if (strstr(gtitle, "Evermore")) {
+            game_candidates[cand_idx++] = "Secret of Evermore (ESP).sfc";
+            game_candidates[cand_idx++] = "Secret of Evermore.sfc";
+        } else if (strstr(gtitle, "Illusion of Time") || strstr(gtitle, "Gaia")) {
+            game_candidates[cand_idx++] = "Illusion of Time (ESP).sfc";
+            game_candidates[cand_idx++] = "Illusion of Time.sfc";
+            game_candidates[cand_idx++] = "Illusion of Gaia.sfc";
+        } else if (strstr(gtitle, "Ys III") || strstr(gtitle, "Wanderers")) {
+            game_candidates[cand_idx++] = "Ys III - Wanderers from Ys (ESP).sfc";
+            game_candidates[cand_idx++] = "Ys III - Wanderers from Ys (ESP).smc";
+            game_candidates[cand_idx++] = "Ys III.sfc";
+        } else if (strstr(gtitle, "Zelda") || strstr(gtitle, "Past")) {
+            game_candidates[cand_idx++] = "The Legend of Zelda - A Link to the Past (ESP).sfc";
+            game_candidates[cand_idx++] = "The Legend of Zelda - A Link to the Past (ESP).smc";
+            game_candidates[cand_idx++] = "The Legend of Zelda - A Link to the Past.sfc";
+            game_candidates[cand_idx++] = "Zelda.sfc";
+        }
+
+        game_candidates[cand_idx++] = "rom.sfc";
+        game_candidates[cand_idx++] = "rom.smc";
+
+        for (int i = 0; i < cand_idx && game_candidates[i]; i++) {
+            if (try_resolve_rom_path(game_candidates[i], resolved_rom, sizeof(resolved_rom))) {
+                strncpy(current_rom, resolved_rom, sizeof(current_rom) - 1);
+                current_rom[sizeof(current_rom) - 1] = '\0';
                 break;
             }
         }
@@ -554,8 +689,17 @@ extern "C" int run_snes_modern_launcher(
                     running = false;
                     result_action = RECOMP_LAUNCHER_RESULT_QUIT;
                 } else if (event.key.scancode == SDL_SCANCODE_RETURN || event.key.scancode == SDL_SCANCODE_KP_ENTER) {
-                    running = false;
-                    result_action = RECOMP_LAUNCHER_RESULT_LAUNCH;
+                    if (current_rom[0] != '\0' && snes_file_exists(current_rom)) {
+                        running = false;
+                        result_action = RECOMP_LAUNCHER_RESULT_LAUNCH;
+                    } else {
+                        char picked[MAX_PATH] = { 0 };
+                        if (prompt_browse_rom(window, picked, sizeof(picked)) && snes_file_exists(picked)) {
+                            strncpy(current_rom, picked, sizeof(current_rom) - 1);
+                            running = false;
+                            result_action = RECOMP_LAUNCHER_RESULT_LAUNCH;
+                        }
+                    }
                 } else if (event.key.scancode == SDL_SCANCODE_F11 ||
                            (event.key.scancode == SDL_SCANCODE_RETURN && (event.key.mod & SDL_KMOD_ALT))) {
                     Uint32 wflags = SDL_GetWindowFlags(window);
@@ -581,8 +725,17 @@ extern "C" int run_snes_modern_launcher(
                     running = false;
                     result_action = RECOMP_LAUNCHER_RESULT_QUIT;
                 } else if (event.key.keysym.scancode == SDL_SCANCODE_RETURN || event.key.keysym.scancode == SDL_SCANCODE_KP_ENTER) {
-                    running = false;
-                    result_action = RECOMP_LAUNCHER_RESULT_LAUNCH;
+                    if (current_rom[0] != '\0' && snes_file_exists(current_rom)) {
+                        running = false;
+                        result_action = RECOMP_LAUNCHER_RESULT_LAUNCH;
+                    } else {
+                        char picked[MAX_PATH] = { 0 };
+                        if (prompt_browse_rom(window, picked, sizeof(picked)) && snes_file_exists(picked)) {
+                            strncpy(current_rom, picked, sizeof(current_rom) - 1);
+                            running = false;
+                            result_action = RECOMP_LAUNCHER_RESULT_LAUNCH;
+                        }
+                    }
                 } else if (event.key.keysym.scancode == SDL_SCANCODE_F11 ||
                            (event.key.keysym.scancode == SDL_SCANCODE_RETURN && (event.key.mod & KMOD_ALT))) {
                     Uint32 wflags = SDL_GetWindowFlags(window);
@@ -712,7 +865,11 @@ extern "C" int run_snes_modern_launcher(
         if (font_title) ImGui::PopFont();
 
         if (font_regular) ImGui::PushFont(font_regular);
-        ImGui::TextColored(ImVec4(0.65f, 0.72f, 0.82f, 1.0f), "Listo para jugar. Pulsa el bot\xc3\xb3n Jugar o la tecla Intro (Enter).");
+        if (current_rom[0] != '\0' && snes_file_exists(current_rom)) {
+            ImGui::TextColored(ImVec4(0.20f, 0.88f, 0.45f, 1.0f), "Listo para jugar. Pulsa el bot\xc3\xb3n Jugar o la tecla Intro (Enter).");
+        } else {
+            ImGui::TextColored(ImVec4(1.00f, 0.65f, 0.15f, 1.0f), "Aviso: Selecciona tu archivo ROM (.sfc/.smc) pulsando Examinar o Jugar.");
+        }
         if (font_regular) ImGui::PopFont();
 
         ImGui::Dummy(ImVec2(0, 10.0f * scale));
@@ -1257,16 +1414,33 @@ extern "C" int run_snes_modern_launcher(
         ImGui::SetCursorPosY((float)win_h - 85.0f * scale);
 
         // Botón Jugar (Play)
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(1.000f, 0.463f, 0.000f, 1.00f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1.000f, 0.580f, 0.150f, 1.00f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.850f, 0.380f, 0.000f, 1.00f));
+        bool has_valid_rom = (current_rom[0] != '\0' && snes_file_exists(current_rom));
+        if (has_valid_rom) {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(1.000f, 0.463f, 0.000f, 1.00f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1.000f, 0.580f, 0.150f, 1.00f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.850f, 0.380f, 0.000f, 1.00f));
+        } else {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.40f, 0.70f, 1.00f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.25f, 0.50f, 0.85f, 1.00f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.12f, 0.30f, 0.60f, 1.00f));
+        }
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
         ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6.0f * scale);
 
         if (font_large) ImGui::PushFont(font_large);
-        if (ImGui::Button("  JUGAR (Play)  ", ImVec2(240.0f * scale, 56.0f * scale))) {
-            running = false;
-            result_action = RECOMP_LAUNCHER_RESULT_LAUNCH;
+        const char *play_label = has_valid_rom ? "  JUGAR (Play)  " : "  SELECCIONAR ROM  ";
+        if (ImGui::Button(play_label, ImVec2(240.0f * scale, 56.0f * scale))) {
+            if (has_valid_rom) {
+                running = false;
+                result_action = RECOMP_LAUNCHER_RESULT_LAUNCH;
+            } else {
+                char picked[MAX_PATH] = { 0 };
+                if (prompt_browse_rom(window, picked, sizeof(picked)) && snes_file_exists(picked)) {
+                    strncpy(current_rom, picked, sizeof(current_rom) - 1);
+                    running = false;
+                    result_action = RECOMP_LAUNCHER_RESULT_LAUNCH;
+                }
+            }
         }
         if (font_large) ImGui::PopFont();
 
@@ -1333,11 +1507,20 @@ extern "C" int run_snes_modern_launcher(
     save_snes_config(cfg_file, fullscreen, window_scale, display_aspect, widescreen,
                      linear_filter, vsync, volume, NULL, integer_scaling, color_mode);
 
-    // Guardar rom.cfg
+    // Guardar rom.cfg con ruta absoluta si existe
     if (current_rom[0] != '\0') {
+        char full_save[MAX_PATH] = { 0 };
+        if (snes_file_exists(current_rom)) {
+#ifdef _WIN32
+            GetFullPathNameA(current_rom, MAX_PATH, full_save, NULL);
+#else
+            realpath(current_rom, full_save);
+#endif
+        }
+        const char *to_write = (full_save[0] != '\0') ? full_save : current_rom;
         FILE *from = fopen("rom.cfg", "w");
         if (from) {
-            fprintf(from, "%s\n", current_rom);
+            fprintf(from, "%s\n", to_write);
             fclose(from);
         }
     }
@@ -1353,7 +1536,16 @@ extern "C" int run_snes_modern_launcher(
         io->vsync = vsync;
     }
     if (out_rom_path && out_rom_path_len > 0 && current_rom[0] != '\0') {
-        strncpy(out_rom_path, current_rom, out_rom_path_len - 1);
+        char full_out[MAX_PATH] = { 0 };
+        if (snes_file_exists(current_rom)) {
+#ifdef _WIN32
+            GetFullPathNameA(current_rom, MAX_PATH, full_out, NULL);
+#else
+            realpath(current_rom, full_out);
+#endif
+        }
+        const char *to_pass = (full_out[0] != '\0') ? full_out : current_rom;
+        strncpy(out_rom_path, to_pass, out_rom_path_len - 1);
         out_rom_path[out_rom_path_len - 1] = '\0';
     }
 
