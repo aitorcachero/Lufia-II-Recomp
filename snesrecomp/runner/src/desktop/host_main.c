@@ -3080,6 +3080,9 @@ static void LauncherCommit(const RecompLauncherCSettings *ls, const char *config
       g_config.widescreen = 1;
       g_config.ignore_aspect_ratio = 0;
     } else if (g_config.display_aspect == 2) {
+      g_config.widescreen = 1;
+      g_config.ignore_aspect_ratio = 0;
+    } else if (g_config.display_aspect == 3) {
       g_config.widescreen = 0;
       g_config.ignore_aspect_ratio = 1;
     }

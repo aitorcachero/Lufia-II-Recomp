@@ -185,7 +185,7 @@ static void save_snes_config(const char *config_path, int fullscreen, int window
 
     fprintf(f, "[Graphics]\n");
     fprintf(f, "DisplayAspect = %s\n", aspect_str);
-    fprintf(f, "Widescreen = %d\n", (display_aspect == 1 || display_aspect == 2 || widescreen) ? 1 : 0);
+    fprintf(f, "Widescreen = %d\n", (display_aspect == 1 || display_aspect == 2) ? 1 : 0);
     fprintf(f, "IgnoreAspectRatio = %d\n", (display_aspect == 3) ? 1 : 0);
     fprintf(f, "Fullscreen = %d\n", fullscreen ? 1 : 0);
     fprintf(f, "WindowScale = %d\n", window_scale);
@@ -854,7 +854,7 @@ extern "C" int run_snes_modern_launcher(
                 } else {
                     if (ImGui::Button(ws_modes[m], ImVec2(bw, 36.0f * scale))) {
                         display_aspect = m_aspect;
-                        widescreen = (m_aspect != 0) ? 1 : 0;
+                        widescreen = (m_aspect == 1 || m_aspect == 2) ? 1 : 0;
                         active_preset = 3;
                     }
                 }
